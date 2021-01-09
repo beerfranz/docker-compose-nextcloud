@@ -1,0 +1,65 @@
+version: '3'
+
+services:
+
+  traefik:
+    image: traefik:v2.1.3
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/traefik-certificates:/var/certificates
+    labels:
+      - traefik.http.middlewares.force_https.redirectscheme.scheme=https
+    command:
+      - --providers.docker=true
+      - --accesslog=true
+      - --entryPoints.web.address=:80
+      - --entryPoints.websecure.address=:443
+      - --certificatesResolvers.le.acme.email=$MAIL_ADDRESS
+      - --certificatesResolvers.le.acme.storage=/var/certificates/acme.json
+      - --certificatesResolvers.le.acme.httpChallenge.entryPoint=web
+
+  nextcloud:
+    image: nextcloud:18.0.2-apache
+    environment:
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=a_fake_password
+      - POSTGRES_HOST=nextcloud-db
+      - REDIS_HOST=nextcloud-redis
+      - MAIL_FROM_ADDRESS=nextcloud
+      - MAIL_DOMAIN=$MAIN_DOMAIN
+      - NEXTCLOUD_ADMIN_USER=admin
+      - NEXTCLOUD_ADMIN_PASSWORD=$NEXTCLOUD_ADMIN_PASSWORD
+      - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.$MAIN_DOMAIN
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+    volumes:
+      - ./data/nextcloud:/var/www/html
+    restart: always
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+    labels:
+      - traefik.http.routers.nextcloud.rule=Host(`nextcloud.$MAIN_DOMAIN`)
+      - traefik.http.routers.nextcloud-unsecure.rule=Host(`nextcloud.$MAIN_DOMAIN`)
+      - traefik.http.routers.nextcloud-unsecure.middlewares=force_https
+      - traefik.http.routers.nextcloud.tls=true
+      - traefik.http.routers.nextcloud.tls.certresolver=le
+
+  nextcloud-db:
+    image: postgres:9.6.17-alpine
+    restart: always
+    volumes:
+      - ./data/nextcloud_postgres:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=a_fake_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+
+  nextcloud-redis:
+    image: redis:5.0.7
+    restart: always
